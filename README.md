@@ -21,3 +21,17 @@ Tips
 
 Credits
 - Written by Natalie Spiva <natalie@acreetionos.org>
+
+## Running
+
+- python3 -m venv .venv
+- source .venv/bin/activate
+- python -m pip install --upgrade pip setuptools wheel
+- python -m pip install -r requirements.txt
+- python main.py
+- (To run tests) python -m pytest -q
+
+Common missing dependencies: pytest and prompt_toolkit
+Install them with:
+
+python -m pip install pytest prompt_toolkit

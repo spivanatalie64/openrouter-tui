@@ -17,20 +17,22 @@ build() {
 }
 
 package() {
-  install -Dm755 "main.py" "$pkgdir/usr/bin/openrouter-tui"
+  # Install from the extracted source directory to avoid path issues
+  srcdir_subdir="$srcdir/${pkgname}-${pkgver}"
+  install -Dm755 "$srcdir_subdir/main.py" "$pkgdir/usr/bin/openrouter-tui"
 
   mkdir -p "$pkgdir/usr/share/$pkgname"
-  install -Dm644 "openrouter_client.py" "$pkgdir/usr/share/$pkgname/openrouter_client.py"
-  if [[ -f README.md ]]; then
-    install -Dm644 "README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "$srcdir_subdir/openrouter_client.py" "$pkgdir/usr/share/$pkgname/openrouter_client.py"
+  if [[ -f "$srcdir_subdir/README.md" ]]; then
+    install -Dm644 "$srcdir_subdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
   fi
-  if [[ -f requirements.txt ]]; then
-    install -Dm644 "requirements.txt" "$pkgdir/usr/share/doc/$pkgname/requirements.txt"
+  if [[ -f "$srcdir_subdir/requirements.txt" ]]; then
+    install -Dm644 "$srcdir_subdir/requirements.txt" "$pkgdir/usr/share/doc/$pkgname/requirements.txt"
   fi
 
   # Include tests for downstream developers
-  if [[ -d tests ]]; then
+  if [[ -d "$srcdir_subdir/tests" ]]; then
     mkdir -p "$pkgdir/usr/share/$pkgname/tests"
-    cp -a tests/* "$pkgdir/usr/share/$pkgname/tests/"
+    cp -a "$srcdir_subdir/tests/"* "$pkgdir/usr/share/$pkgname/tests/"
   fi
 }

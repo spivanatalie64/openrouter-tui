@@ -40,7 +40,12 @@ EOF
 # Append push commands per remote
 for remote in ${REMOTES//,/ } ; do
   PROMPT+=$"\n# Push to ${remote}\n"
-  PROMPT+=$"GIT_SSH_COMMAND=\"ssh -o BatchMode=yes -o ConnectTimeout=10\" git push ${remote} ${BRANCH} --set-upstream || echo 'PUSH_FAILED ${remote}'\n"
+  if [[ "${remote}" == "origin" ]]; then
+    # Use custom GitLab SSH port 2499 for origin (gitlab.acreetionos.org)
+    PROMPT+=$"GIT_SSH_COMMAND=\"ssh -o BatchMode=yes -o ConnectTimeout=10 -p 2499\" git push ${remote} ${BRANCH} --set-upstream || echo 'PUSH_FAILED ${remote}'\n"
+  else
+    PROMPT+=$"GIT_SSH_COMMAND=\"ssh -o BatchMode=yes -o ConnectTimeout=10\" git push ${remote} ${BRANCH} --set-upstream || echo 'PUSH_FAILED ${remote}'\n"
+  fi
 done
 
 # Add PR/MR creation steps

@@ -61,3 +61,59 @@ def test_save_conversation_ignores_errors(tmp_path):
     ):
         save_conversation(bad_path, [])
         # Should not raise exception
+
+
+import os
+import sys
+
+
+@patch.dict(os.environ, clear=True)
+def test_main_no_api_key(capsys):
+    with patch.object(sys, "argv", ["main.py"]):
+        from main import main
+
+        main()
+    out, _ = capsys.readouterr()
+    assert "Please set the OPENROUTER_API_KEY" in out
+
+
+@patch("main.PromptSession")
+@patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake"})
+@patch("main.create_chat")
+def test_main_chat_flow(mock_create_chat, mock_session_cls, tmp_path):
+    history_file = tmp_path / "history.json"
+    mock_session = MagicMock()
+    # 1. Startup model choice
+    # 2. User message
+    # 3. /save command
+    # 4. /clear command
+    # 5. /export command
+    # 6. /model command
+    # 7. Model choice for /model
+    # 8. KeyboardInterrupt to exit
+    mock_session.prompt.side_effect = [
+        "m1",
+        "hello",
+        "/save",
+        "/clear",
+        "/export",
+        "/model",
+        "m2",
+        KeyboardInterrupt(),
+    ]
+    mock_session_cls.return_value = mock_session
+
+    # mock_create_chat yields (chunk, usage)
+    mock_create_chat.return_value = [("Hi", None), ("!", {"total_tokens": 10})]
+
+    from main import main
+
+    with patch.object(sys, "argv", ["main.py", "--history-file", str(history_file)]):
+        main()
+
+    assert history_file.exists()
+    # Check if export file exists
+    exports = list(Path.cwd().glob("conversation_export_*.md"))
+    for f in exports:
+        f.unlink()
+

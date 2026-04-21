@@ -11,6 +11,10 @@ authors = [ { name = "Natalie Spiva", email = "natalie@acreetionos.org" } ]
 license = { text = "MIT" }
 dependencies = ["requests>=2.0", "prompt_toolkit>=3.0"]
 
+[project.urls]
+"Homepage" = "https://github.com/spivanatalie64/openrouter-tui"
+"Bug Tracker" = "https://acreetionos.org/contact.html"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

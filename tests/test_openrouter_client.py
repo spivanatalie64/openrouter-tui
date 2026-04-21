@@ -64,3 +64,48 @@ def test_create_chat_stream(mock_post):
     result_gen = create_chat("fake-key", [], stream=True)
     results = list(result_gen)
     assert results == [("Hello", None), (" stream", {"total_tokens": 15})]
+
+
+def test_parse_stream_line_bytes_error():
+    raw = b"data: \xff\xfe"
+    assert _parse_stream_line(raw) == ("", None)
+
+
+@patch("openrouter_client.requests.post")
+def test_create_chat_list_models(mock_post):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "Hi"}}]}
+    mock_post.return_value = mock_resp
+
+    create_chat("fake-key", [], model=["m1", "m2"])
+    assert mock_post.call_args[1]["json"]["models"] == ["m1", "m2"]
+
+
+@patch("openrouter_client.requests.post")
+def test_create_chat_fallback_parsing(mock_post):
+    # Test choices without message but with text
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"choices": [{"text": "fallback text"}]}
+    mock_post.return_value = mock_resp
+
+    result = create_chat("fake-key", [])
+    assert result["content"] == "fallback text"
+
+    # Test full fallback to json dump
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"error": "bad"}
+    mock_post.return_value = mock_resp
+
+    result = create_chat("fake-key", [])
+    assert '{"error": "bad"}' in result["content"]
+
+
+@patch("openrouter_client.requests.post")
+def test_create_chat_network_error(mock_post):
+    import requests
+
+    mock_post.side_effect = requests.exceptions.ConnectionError("fail")
+
+    with pytest.raises(OpenRouterError, match="Network error"):
+        create_chat("fake-key", [])
+

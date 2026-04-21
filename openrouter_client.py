@@ -15,8 +15,9 @@ Written by Natalie Spiva <natalie@acreetionos.org>
 """
 
 import json
+from typing import Any, Iterable, Optional, TypedDict, Union
+
 import requests
-from typing import Iterable
 
 # The chat completions endpoint used by OpenRouter's public API.
 OPENROUTER_URL = "https://api.openrouter.ai/v1/chat/completions"
@@ -47,43 +48,67 @@ MODELS = [
 ]
 
 
+class Message(TypedDict):
+    """Schema for a single chat message."""
+
+    role: str
+    content: str
+
+
+class Usage(TypedDict, total=False):
+    """Schema for API usage metrics."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class ChatResponse(TypedDict):
+    """Schema for a full chat response."""
+
+    content: str
+    usage: Optional[Usage]
+
+
 class OpenRouterError(RuntimeError):
     """Raised when the OpenRouter API returns an error or can't be reached."""
 
 
-def _parse_stream_line(raw_line: str) -> str:
-    """Turn a raw streaming line into a user-facing chunk of text."""
+def _parse_stream_line(raw_line: Union[str, bytes]) -> tuple[str, Optional[Usage]]:
+    """Turn a raw streaming line into a user-facing chunk of text and usage info."""
     if not raw_line:
-        return ""
+        return "", None
     text = raw_line
     if isinstance(text, bytes):
         try:
             text = text.decode("utf-8")
         except Exception:
-            text = ""
+            text = str(raw_line)
     if text.startswith("data:"):
         text = text[len("data:") :].strip()
     if not text or text == "[DONE]":
-        return ""
+        return "", None
 
     try:
         obj = json.loads(text)
+        # Usage can sometimes be in the last chunk
+        usage: Optional[Usage] = obj.get("usage")
         choice = obj.get("choices", [{}])[0]
         delta = choice.get("delta", {})
         chunk = delta.get("content") or choice.get("text") or ""
+        return chunk, usage
     except Exception:
-        chunk = text
-    return chunk or ""
+        return str(text), None
 
 
 def create_chat(
     api_key: str,
-    messages: list,
-    model: str | list = "openai/gpt-5.4",
+    messages: list[Message],
+    model: Union[str, list[str]] = "openai/gpt-5.4",
     stream: bool = False,
     max_tokens: int = 1024,
     timeout: int = 120,
-) -> Iterable[str] | list:
+) -> Union[Iterable[tuple[str, Optional[Usage]]], ChatResponse]:
     """Call the OpenRouter chat completions endpoint."""
     if not api_key:
         raise OpenRouterError("Missing OpenRouter API key — set OPENROUTER_API_KEY.")
@@ -95,7 +120,11 @@ def create_chat(
         "X-Title": "Natalie-TUI",
     }
 
-    payload = {"messages": messages, "max_tokens": max_tokens, "stream": stream}
+    payload: dict[str, Any] = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "stream": stream,
+    }
     if model == "super-model":
         payload["models"] = MODELS
     elif isinstance(model, list):
@@ -106,7 +135,7 @@ def create_chat(
     try:
         if stream:
 
-            def stream_gen():
+            def stream_gen() -> Iterable[tuple[str, Optional[Usage]]]:
                 with requests.post(
                     OPENROUTER_URL,
                     headers=headers,
@@ -120,9 +149,9 @@ def create_chat(
                         raise OpenRouterError(f"OpenRouter HTTP error: {exc}") from exc
 
                     for raw in r.iter_lines(decode_unicode=True):
-                        chunk = _parse_stream_line(raw)
-                        if chunk:
-                            yield chunk
+                        chunk, usage = _parse_stream_line(raw)
+                        if chunk or usage:
+                            yield chunk, usage
 
             return stream_gen()
 
@@ -137,6 +166,7 @@ def create_chat(
             ) from exc
 
         j = r.json()
+        usage_data = j.get("usage")
         content = ""
         try:
             content = j["choices"][0]["message"]["content"]
@@ -145,7 +175,8 @@ def create_chat(
                 content = j.get("choices", [])[0].get("text", "")
             except Exception:
                 content = json.dumps(j)
-        return [content]
+
+        return {"content": content, "usage": usage_data}
 
     except requests.exceptions.RequestException as exc:
         raise OpenRouterError(f"Network error when calling OpenRouter: {exc}") from exc

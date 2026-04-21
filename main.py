@@ -6,16 +6,25 @@ Written by Natalie Spiva <natalie@acreetionos.org>
 Set OPENROUTER_API_KEY before running.
 """
 
-import os
-import json
-from pathlib import Path
 import argparse
+import datetime
+import json
+import os
+from pathlib import Path
+from typing import Iterable, Optional
+
+from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
-from openrouter_client import create_chat, MODELS
+from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.status import Status
+
+from openrouter_client import MODELS, Message, OpenRouterError, Usage, create_chat
 
 
-def choose_model(session, default="super-model"):
+def choose_model(session: PromptSession, default: str = "super-model") -> str:
     """
     Prompt the user to select a model from the available list.
 
@@ -31,14 +40,15 @@ def choose_model(session, default="super-model"):
     for m in MODELS:
         prompt += f" - {m}\n"
     prompt += f"\nModel (default {default}): "
-    return session.prompt(prompt, default=default).strip() or default
+    return str(session.prompt(prompt, default=default).strip() or default)
 
 
 def _default_history_path() -> Path:
+    """Return the default path for the history file."""
     return Path(os.path.expanduser("~")) / ".openrouter_tui" / "history.json"
 
 
-def load_last_messages(history_path: Path):
+def load_last_messages(history_path: Path) -> Optional[list[Message]]:
     """
     Load the messages from the most recent conversation in the history file.
 
@@ -52,16 +62,22 @@ def load_last_messages(history_path: Path):
         if not history_path.exists():
             return None
         data = json.loads(history_path.read_text(encoding="utf-8"))
+        # Support both new and legacy formats
         convos = data.get("conversations", []) if isinstance(data, dict) else data
         if not convos:
             return None
         last = convos[-1]
-        return last.get("messages") if isinstance(last, dict) else last
+        # Handle list of conversations or single conversation
+        if isinstance(last, dict):
+            return last.get("messages")  # type: ignore
+        if isinstance(last, list):
+            return last  # type: ignore
+        return None
     except Exception:
         return None
 
 
-def save_conversation(history_path: Path, messages):
+def save_conversation(history_path: Path, messages: list[Message]) -> None:
     """
     Save the current conversation messages to the history file.
 
@@ -74,13 +90,16 @@ def save_conversation(history_path: Path, messages):
         existing = []
         if history_path.exists():
             try:
-                existing = json.loads(history_path.read_text(encoding="utf-8"))
-                if isinstance(existing, dict):
-                    existing = existing.get("conversations", [])
+                data = json.loads(history_path.read_text(encoding="utf-8"))
+                existing = (
+                    data.get("conversations", []) if isinstance(data, dict) else data
+                )
             except Exception:
                 existing = []
         # Append this conversation as a dict for readability
-        existing.append({"messages": messages})
+        existing.append(
+            {"messages": messages, "timestamp": str(datetime.datetime.now())}
+        )
         # Write back as an object with conversations key for future extensibility
         out = {"conversations": existing}
         history_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
@@ -89,12 +108,20 @@ def save_conversation(history_path: Path, messages):
         pass  # nosec B110
 
 
-def main():
+def main() -> None:
+    """Main entry point for the OpenRouter TUI."""
+    load_dotenv()  # Load .env file if it exists
+
     parser = argparse.ArgumentParser(description="OpenRouter TUI")
     parser.add_argument(
         "--history-file",
         default=None,
         help="Path to history file (default: ~/.openrouter_tui/history.json)",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        default="You are a helpful assistant.",
+        help="Custom system prompt to start the conversation.",
     )
     args = parser.parse_args()
 
@@ -104,32 +131,42 @@ def main():
 
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        print("Please set the OPENROUTER_API_KEY environment variable and try again.")
+        print(
+            "Please set the OPENROUTER_API_KEY environment variable or in a .env file and try again."
+        )
         return
 
-    session = PromptSession()
+    session: PromptSession = PromptSession()
+    console = Console()
 
-    try:
-        # Load last conversation if available and offer to restore
-        last_messages = load_last_messages(history_path)
-        if last_messages:
+    # Load last conversation if available and offer to restore
+    last_messages = load_last_messages(history_path)
+    if last_messages:
+        try:
             resp = session.prompt("Load last conversation? (y/N): ").strip().lower()
             if resp == "y":
                 messages = last_messages
-                print("Loaded last conversation. Continuing where you left off.\n")
+                console.print(
+                    "[green]Loaded last conversation. Continuing where you left off.\n[/green]"
+                )
             else:
-                messages = [
-                    {"role": "system", "content": "You are a helpful assistant."}
-                ]
-        else:
-            messages = [{"role": "system", "content": "You are a helpful assistant."}]
+                messages = [{"role": "system", "content": args.system_prompt}]
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Take care — goodbye![/yellow]")
+            return
+    else:
+        messages = [{"role": "system", "content": args.system_prompt}]
 
-        # Let the user pick a model at startup
-        model = choose_model(session)
+    # Let the user pick a model at startup
+    model = choose_model(session)
 
-        print(
-            "\nWelcome to OpenRouter TUI — type a message and press Enter.\nType '/model' at any time to change the model. Type '/save' to save the conversation. Ctrl-C to exit.\n"
-        )
+    console.print(
+        "\nWelcome to [bold blue]OpenRouter TUI[/bold blue] — type a message and press Enter.\n"
+        "Commands: [cyan]/model[/cyan] (change model), [cyan]/save[/cyan] (save history), "
+        "[cyan]/clear[/cyan] (reset), [cyan]/export[/cyan] (save as MD), [red]Ctrl-C[/red] (exit).\n"
+    )
+
+    try:
         while True:
             with patch_stdout():
                 user_input = session.prompt("You » ")
@@ -139,37 +176,87 @@ def main():
             # Special command to change model
             if user_input.strip().startswith("/model"):
                 model = choose_model(session, default=model)
-                print(f"Model switched to: {model}\n")
+                console.print(f"Model switched to: [bold]{model}[/bold]\n")
                 continue
 
             # Save command
             if user_input.strip().startswith("/save"):
                 save_conversation(history_path, messages)
-                print(f"Conversation saved to: {history_path}\n")
+                console.print(f"Conversation saved to: [dim]{history_path}[/dim]\n")
+                continue
+
+            # Clear command
+            if user_input.strip().startswith("/clear"):
+                messages = [{"role": "system", "content": args.system_prompt}]
+                console.print("[yellow]Conversation cleared.[/yellow]\n")
+                continue
+
+            # Export command
+            if user_input.strip().startswith("/export"):
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                export_path = Path.cwd() / f"conversation_export_{ts}.md"
+                md_content = f"# OpenRouter Conversation Export - {ts}\n\n"
+                for msg in messages:
+                    role = msg["role"].capitalize()
+                    md_content += f"### {role}\n\n{msg['content']}\n\n"
+                export_path.write_text(md_content, encoding="utf-8")
+                console.print(f"Conversation exported to: [dim]{export_path}[/dim]\n")
                 continue
 
             messages.append({"role": "user", "content": user_input})
 
-            print("Assistant » ", end="", flush=True)
-            buffer = []
+            buffer: list[str] = []
+            usage: Optional[Usage] = None
+
             try:
-                # stream=True will yield chunks as they arrive
-                for chunk in create_chat(api_key, messages, model=model, stream=True):
-                    print(chunk, end="", flush=True)
-                    buffer.append(chunk)
+                with Status("[bold green]Thinking...", console=console) as status:
+                    # stream=True will yield chunks as they arrive
+                    response_gen = create_chat(
+                        api_key, messages, model=model, stream=True
+                    )
+                    # We need to handle the fact that create_chat returns an Iterable when stream=True
+                    if not isinstance(response_gen, Iterable):
+                        raise OpenRouterError(
+                            "Expected streaming response from create_chat"
+                        )
+
+                    first_chunk = True
+                    md = Markdown("")
+                    with Live(md, console=console, refresh_per_second=10) as live:
+                        # Help MyPy understand we are iterating over the generator
+                        for chunk, usage_info in response_gen:  # type: ignore[str-unpack, assignment]
+                            if first_chunk:
+                                status.stop()
+                                print("Assistant » ", end="", flush=True)
+                                first_chunk = False
+
+                            if chunk:
+                                buffer.append(chunk)
+                                md = Markdown("".join(buffer))
+                                live.update(md)
+
+                            if usage_info:
+                                usage = usage_info  # type: ignore[assignment]
+
                 final = "".join(buffer)
                 print("\n")
+                if usage:
+                    tokens = usage.get("total_tokens", 0)
+                    console.print(f"[dim]Usage: {tokens} tokens[/dim]\n")
+
                 messages.append({"role": "assistant", "content": final})
 
                 # Auto-save last conversation after assistant replies
                 save_conversation(history_path, messages)
             except Exception as e:
-                print(f"\nError: {e}\n")
+                console.print(f"\n[red]Error: {e}[/red]\n")
                 # Remove the last user message if the assistant failed to reply,
                 # so the conversation state remains consistent.
-                messages.pop()
+                if messages[-1]["role"] == "user":
+                    messages.pop()
+
     except KeyboardInterrupt:
-        print("\nTake care — goodbye!")
+        console.print("\n[yellow]Take care — goodbye![/yellow]")
 
 
 if __name__ == "__main__":

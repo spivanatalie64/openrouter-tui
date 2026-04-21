@@ -10,3 +10,8 @@ readme = "README.md"
 authors = [ { name = "Natalie Spiva", email = "natalie@acreetionos.org" } ]
 license = { text = "MIT" }
 dependencies = ["requests>=2.0", "prompt_toolkit>=3.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+

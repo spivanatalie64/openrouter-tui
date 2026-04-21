@@ -1,0 +1,13 @@
+pkgname = openrouter-tui
+pkgver = 0.1.0
+pkgrel = 1
+pkgdesc = Terminal chat client for the OpenRouter API
+arch = any
+url = https://github.com/spivanatalie64/openrouter-tui-silly
+license = MIT
+depends = python python-requests python-prompt-toolkit
+makedepends = git
+source = openrouter-tui-0.1.0.tar.gz
+sha256sums = SKIP
+
+# No build step; package installs main.py as /usr/bin/openrouter-tui and supporting files to /usr/share/openrouter-tui

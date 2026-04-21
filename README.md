@@ -16,7 +16,7 @@ OpenRouter TUI is a lightweight, friendly terminal-based chat client for the [Op
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/spivanatalie64/openrouter-tui-silly.git
+   git clone https://github.com/spivanatalie64/openrouter-tui.git
    cd openrouter-tui
    ```
 

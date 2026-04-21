@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+setup.cfg
+openrouter_client/__init__.py
+openrouter_tui.egg-info/PKG-INFO
+openrouter_tui.egg-info/SOURCES.txt
+openrouter_tui.egg-info/dependency_links.txt
+openrouter_tui.egg-info/requires.txt
+openrouter_tui.egg-info/top_level.txt
+tests/test_smoke.py

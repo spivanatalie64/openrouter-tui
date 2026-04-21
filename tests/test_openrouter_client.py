@@ -97,3 +97,49 @@ def test_create_chat_network_error(mock_post):
 
     with pytest.raises(OpenRouterError, match="Network error when calling OpenRouter"):
         create_chat("fake-key", [])
+
+def test_parse_stream_line_bytes_error():
+    # Provide something that fails to decode as utf-8 but is bytes
+    # Wait, the code is:
+    # try: text = text.decode("utf-8") except Exception: text = ""
+    # If it fails to decode, it assigns text = "", then proceeds to check if it's string.
+    raw = b"data: \xff\xfe"
+    assert _parse_stream_line(raw) == ""
+
+@patch("openrouter_client.requests.post")
+def test_create_chat_list_models(mock_post):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "Hi there!"}}]}
+    mock_post.return_value = mock_resp
+
+    create_chat("fake-key", [], model=["model-1", "model-2"])
+    assert mock_post.call_args[1]["json"]["models"] == ["model-1", "model-2"]
+
+@patch("openrouter_client.requests.post")
+def test_create_chat_stream_http_error(mock_post):
+    import requests
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("403 Forbidden")
+    mock_post.return_value.__enter__.return_value = mock_resp
+
+    with pytest.raises(OpenRouterError, match="OpenRouter HTTP error: 403 Forbidden"):
+        list(create_chat("fake-key", [], stream=True))
+
+@patch("openrouter_client.requests.post")
+def test_create_chat_fallback_parsing(mock_post):
+    # Test choices without message but with text
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"choices": [{"text": "fallback text"}]}
+    mock_post.return_value = mock_resp
+
+    result = create_chat("fake-key", [])
+    assert result == ["fallback text"]
+
+    # Test full fallback to json dump
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"some": "error", "message": "invalid format"}
+    mock_post.return_value = mock_resp
+
+    result = create_chat("fake-key", [])
+    assert "invalid format" in result[0]
+

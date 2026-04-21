@@ -69,3 +69,80 @@ def test_save_conversation_ignores_errors(tmp_path):
     ):
         save_conversation(bad_path, [])
         # Should not raise exception
+
+import os
+import sys
+from main import _default_history_path, main
+
+def test_default_history_path():
+    path = _default_history_path()
+    assert path.name == "history.json"
+    assert ".openrouter_tui" in str(path)
+
+@patch.dict(os.environ, clear=True)
+def test_main_no_api_key(capsys):
+    with patch.object(sys, "argv", ["main.py"]):
+        main()
+    out, _ = capsys.readouterr()
+    assert "Please set the OPENROUTER_API_KEY" in out
+
+@patch("main.PromptSession")
+@patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake"})
+def test_main_exit_immediately(mock_session):
+    mock_instance = MagicMock()
+    mock_instance.prompt.side_effect = KeyboardInterrupt()
+    mock_session.return_value = mock_instance
+    with patch.object(sys, "argv", ["main.py"]):
+        main()
+
+@patch("main.PromptSession")
+@patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake"})
+@patch("main.create_chat")
+def test_main_chat_flow(mock_create_chat, mock_session, tmp_path):
+    history_file = tmp_path / "history.json"
+    mock_instance = MagicMock()
+    mock_instance.prompt.side_effect = [
+        "model", # choose_model at startup
+        "hello", # user message
+        "/model", # switch model command
+        "new-model", # choose_model for /model
+        "/save", # save command
+        "  ", # empty message, should be ignored
+        KeyboardInterrupt() # exit
+    ]
+    mock_session.return_value = mock_instance
+    mock_create_chat.return_value = ["Hi", " there"]
+    with patch.object(sys, "argv", ["main.py", "--history-file", str(history_file)]):
+        main()
+    assert history_file.exists()
+
+@patch("main.PromptSession")
+@patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake"})
+@patch("main.create_chat")
+def test_main_chat_error(mock_create_chat, mock_session, tmp_path):
+    history_file = tmp_path / "history.json"
+    mock_instance = MagicMock()
+    mock_instance.prompt.side_effect = [
+        "model", # choose_model at startup
+        "hello", # user message
+        KeyboardInterrupt() # exit
+    ]
+    mock_session.return_value = mock_instance
+    mock_create_chat.side_effect = Exception("API Error")
+    with patch.object(sys, "argv", ["main.py", "--history-file", str(history_file)]):
+        main()
+
+@patch("main.PromptSession")
+@patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake"})
+def test_main_load_history(mock_session, tmp_path):
+    history_file = tmp_path / "history.json"
+    history_file.write_text('{"conversations": [{"messages": [{"role": "user", "content": "hi"}]}]}')
+    mock_instance = MagicMock()
+    # prompt for "Load last conversation? (y/N): "
+    # then choose_model
+    # then KeyboardInterrupt
+    mock_instance.prompt.side_effect = ["y", "model", KeyboardInterrupt()]
+    mock_session.return_value = mock_instance
+    with patch.object(sys, "argv", ["main.py", "--history-file", str(history_file)]):
+        main()
+

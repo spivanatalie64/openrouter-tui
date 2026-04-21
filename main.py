@@ -109,10 +109,10 @@ def main():
 
     session = PromptSession()
 
-    # Load last conversation if available and offer to restore
-    last_messages = load_last_messages(history_path)
-    if last_messages:
-        try:
+    try:
+        # Load last conversation if available and offer to restore
+        last_messages = load_last_messages(history_path)
+        if last_messages:
             resp = session.prompt("Load last conversation? (y/N): ").strip().lower()
             if resp == "y":
                 messages = last_messages
@@ -121,19 +121,15 @@ def main():
                 messages = [
                     {"role": "system", "content": "You are a helpful assistant."}
                 ]
-        except KeyboardInterrupt:
-            print("\nTake care — goodbye!")
-            return
-    else:
-        messages = [{"role": "system", "content": "You are a helpful assistant."}]
+        else:
+            messages = [{"role": "system", "content": "You are a helpful assistant."}]
 
-    # Let the user pick a model at startup
-    model = choose_model(session)
+        # Let the user pick a model at startup
+        model = choose_model(session)
 
-    print(
-        "\nWelcome to OpenRouter TUI — type a message and press Enter.\nType '/model' at any time to change the model. Type '/save' to save the conversation. Ctrl-C to exit.\n"
-    )
-    try:
+        print(
+            "\nWelcome to OpenRouter TUI — type a message and press Enter.\nType '/model' at any time to change the model. Type '/save' to save the conversation. Ctrl-C to exit.\n"
+        )
         while True:
             with patch_stdout():
                 user_input = session.prompt("You » ")
@@ -172,7 +168,6 @@ def main():
                 # Remove the last user message if the assistant failed to reply,
                 # so the conversation state remains consistent.
                 messages.pop()
-
     except KeyboardInterrupt:
         print("\nTake care — goodbye!")
 

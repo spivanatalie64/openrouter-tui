@@ -60,7 +60,7 @@ def _parse_stream_line(raw_line: str) -> str:
         try:
             text = text.decode("utf-8")
         except Exception:
-            text = raw_line
+            text = ""
     if text.startswith("data:"):
         text = text[len("data:") :].strip()
     if not text or text == "[DONE]":

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openrouter-tui"
+version = "0.1.0"
+description = "Terminal chat client for OpenRouter API"
+readme = "README.md"
+authors = [ { name = "Natalie Spiva", email = "natalie@acreetionos.org" } ]
+license = { text = "MIT" }
+dependencies = ["requests>=2.0", "prompt_toolkit>=3.0"]

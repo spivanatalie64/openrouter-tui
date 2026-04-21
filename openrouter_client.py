@@ -1,12 +1,19 @@
 """
-OpenRouter client utilities — friendlier, documented, and a little human.
+OpenRouter Client Module
 
-This module provides a tiny helper to call the OpenRouter chat completion endpoint
-and a small list of suggested model names. The code aims to be forgiving and to
-return streaming chunks when requested so TUI code can display text as it arrives.
+This module provides utilities to interact with the OpenRouter API, supporting
+both standard and streaming chat completions. It includes a pre-defined list
+of high-performing models and robust error handling.
+
+Features:
+- Streaming response parsing.
+- Automatic model fallback using 'super-model'.
+- Support for multiple model slugs.
+- Increased timeouts for complex reasoning models.
 
 Written by Natalie Spiva <natalie@acreetionos.org>
 """
+
 import json
 import requests
 from typing import Iterable
@@ -14,13 +21,29 @@ from typing import Iterable
 # The chat completions endpoint used by OpenRouter's public API.
 OPENROUTER_URL = "https://api.openrouter.ai/v1/chat/completions"
 
-# A short, user-facing list of common/sane models to choose from. This is
-# opinionated and can be edited by the user. The TUI displays these choices.
+# Top 20 models for programming and engineering tasks (as of April 2026).
+# These are selected for SWE-bench performance, context window, and logic.
 MODELS = [
-    "gpt-4o-mini",
-    "gpt-4o",
-    "gpt-4o-mini-512",
-    "gpt-4o-mini-instruct",
+    "openai/gpt-5.4",  # Latest OpenAI frontier model
+    "openai/gpt-5.2-codex",  # Optimized specifically for agentic coding
+    "anthropic/claude-4.6-sonnet",  # 1M context, elite reasoning & coding
+    "anthropic/claude-4.6-opus",  # Maximum intelligence for complex architecture
+    "google/gemini-3-pro",  # Leader in LiveCodeBench (91.7% score)
+    "google/gemini-3-flash",  # High-speed agentic coding with 1M context
+    "mistralai/devstral-2-2512",  # Mistral's 123B agentic coding specialist
+    "mistralai/codestral-latest",  # The industry standard for fill-in-the-middle
+    "deepseek/deepseek-v3.2",  # SOTA cost-to-performance coding logic
+    "deepseek/deepseek-v3",  # High-efficiency GPT-4 class coder
+    "minimax/minimax-m2.7",  # Built for multi-agent repo orchestration
+    "minimax/minimax-m2.5",  # 80%+ SWE-Bench Verified efficiency
+    "qwen/qwen3-coder-480b",  # Alibaba's massive MoE coding specialist
+    "qwen/qwen3-coder-next",  # Budget-friendly coding for simple scripts
+    "kuaishou/kwaipilot-kat-coder-pro",  # High accuracy for real-world engineering
+    "xiaomi/mimo-v2-pro",  # 1T parameter agentic brain
+    "meta-llama/llama-4-maverick",  # Meta's 400B MoE model
+    "meta-llama/llama-4-scout",  # Meta's high-speed 109B model
+    "z-ai/glm-5.1",  # Top-tier reasoning and programming logic
+    "nvidia/nemotron-3-super",  # Optimized for hybrid Mamba-Transformer coding
 ]
 
 
@@ -29,12 +52,7 @@ class OpenRouterError(RuntimeError):
 
 
 def _parse_stream_line(raw_line: str) -> str:
-    """Turn a raw streaming line into a user-facing chunk of text.
-
-    The API may prefix lines with "data:" and typically sends JSON blobs that
-    contain the incremental "delta" content. This helper extracts that text and
-    falls back to a best-effort string if parsing fails.
-    """
+    """Turn a raw streaming line into a user-facing chunk of text."""
     if not raw_line:
         return ""
     text = raw_line
@@ -44,7 +62,7 @@ def _parse_stream_line(raw_line: str) -> str:
         except Exception:
             text = raw_line
     if text.startswith("data:"):
-        text = text[len("data:"):].strip()
+        text = text[len("data:") :].strip()
     if not text or text == "[DONE]":
         return ""
 
@@ -54,7 +72,6 @@ def _parse_stream_line(raw_line: str) -> str:
         delta = choice.get("delta", {})
         chunk = delta.get("content") or choice.get("text") or ""
     except Exception:
-        # If the payload isn't JSON (or is unexpected), return the raw text.
         chunk = text
     return chunk or ""
 
@@ -62,56 +79,64 @@ def _parse_stream_line(raw_line: str) -> str:
 def create_chat(
     api_key: str,
     messages: list,
-    model: str = "gpt-4o-mini",
+    model: str | list = "openai/gpt-5.4",
     stream: bool = False,
-    max_tokens: int = 512,
-    timeout: int = 60,
+    max_tokens: int = 1024,
+    timeout: int = 120,
 ) -> Iterable[str] | list:
-    """Call the OpenRouter chat completions endpoint.
-
-    Parameters
-    - api_key: your OpenRouter API key (kept as a string)
-    - messages: list of message dicts following the OpenAI-style schema
-    - model: model name (string). See MODELS above for suggestions.
-    - stream: if True yields incremental strings as the API streams them.
-    - max_tokens, timeout: forwarded to the HTTP request.
-
-    Returns
-    - If stream=True: a generator that yields string chunks as they arrive.
-    - If stream=False: a list containing one string with the full assistant reply.
-
-    The function raises OpenRouterError for HTTP or API-level failures.
-    """
+    """Call the OpenRouter chat completions endpoint."""
     if not api_key:
         raise OpenRouterError("Missing OpenRouter API key — set OPENROUTER_API_KEY.")
 
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": stream}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://acreetionos.org",  # Optional but helpful for OpenRouter
+        "X-Title": "Natalie-TUI",
+    }
+
+    payload = {"messages": messages, "max_tokens": max_tokens, "stream": stream}
+    if model == "super-model":
+        payload["models"] = MODELS
+    elif isinstance(model, list):
+        payload["models"] = model
+    else:
+        payload["model"] = model
 
     try:
         if stream:
-            # Stream mode: yield chunks as they arrive so callers can render them.
-            with requests.post(OPENROUTER_URL, headers=headers, json=payload, stream=True, timeout=timeout) as r:
-                try:
-                    r.raise_for_status()
-                except Exception as exc:  # HTTP error
-                    raise OpenRouterError(f"OpenRouter HTTP error: {exc}") from exc
 
-                for raw in r.iter_lines(decode_unicode=True):
-                    chunk = _parse_stream_line(raw)
-                    if chunk:
-                        yield chunk
-            return
+            def stream_gen():
+                with requests.post(
+                    OPENROUTER_URL,
+                    headers=headers,
+                    json=payload,
+                    stream=True,
+                    timeout=timeout,
+                ) as r:
+                    try:
+                        r.raise_for_status()
+                    except Exception as exc:
+                        raise OpenRouterError(f"OpenRouter HTTP error: {exc}") from exc
 
-        # Non-streaming: return the assembled assistant text as a single-element list
-        r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
+                    for raw in r.iter_lines(decode_unicode=True):
+                        chunk = _parse_stream_line(raw)
+                        if chunk:
+                            yield chunk
+
+            return stream_gen()
+
+        r = requests.post(
+            OPENROUTER_URL, headers=headers, json=payload, timeout=timeout
+        )
         try:
             r.raise_for_status()
         except Exception as exc:
-            raise OpenRouterError(f"OpenRouter HTTP error: {exc} — response: {r.text}") from exc
+            raise OpenRouterError(
+                f"OpenRouter HTTP error: {exc} — response: {r.text}"
+            ) from exc
 
         j = r.json()
-        # Common shapes: try to extract message content, fall back to choices[].text
         content = ""
         try:
             content = j["choices"][0]["message"]["content"]
@@ -123,5 +148,4 @@ def create_chat(
         return [content]
 
     except requests.exceptions.RequestException as exc:
-        # Network-level or timeout errors
         raise OpenRouterError(f"Network error when calling OpenRouter: {exc}") from exc

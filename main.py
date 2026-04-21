@@ -5,6 +5,7 @@ OpenRouter TUI — a small, friendly terminal chat client for the OpenRouter API
 Written by Natalie Spiva <natalie@acreetionos.org>
 Set OPENROUTER_API_KEY before running.
 """
+
 import os
 import json
 from pathlib import Path
@@ -14,8 +15,19 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from openrouter_client import create_chat, MODELS
 
 
-def choose_model(session, default="gpt-4o-mini"):
+def choose_model(session, default="super-model"):
+    """
+    Prompt the user to select a model from the available list.
+
+    Args:
+        session: The current PromptSession instance.
+        default: The default model to use if no input is provided.
+
+    Returns:
+        The selected model name string.
+    """
     prompt = "Choose a model (comma-separated list shown below). Press Enter to accept default.\n\n"
+    prompt += " - super-model (Auto-fallback across top 20 models)\n"
     for m in MODELS:
         prompt += f" - {m}\n"
     prompt += f"\nModel (default {default}): "
@@ -27,6 +39,15 @@ def _default_history_path() -> Path:
 
 
 def load_last_messages(history_path: Path):
+    """
+    Load the messages from the most recent conversation in the history file.
+
+    Args:
+        history_path: Path to the JSON history file.
+
+    Returns:
+        A list of message dictionaries if found, otherwise None.
+    """
     try:
         if not history_path.exists():
             return None
@@ -41,6 +62,13 @@ def load_last_messages(history_path: Path):
 
 
 def save_conversation(history_path: Path, messages):
+    """
+    Save the current conversation messages to the history file.
+
+    Args:
+        history_path: Path to the JSON history file.
+        messages: List of message dictionaries to save.
+    """
     try:
         history_path.parent.mkdir(parents=True, exist_ok=True)
         existing = []
@@ -58,15 +86,21 @@ def save_conversation(history_path: Path, messages):
         history_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
     except Exception:
         # Persisting history should never crash the app; ignore errors.
-        pass
+        pass  # nosec B110
 
 
 def main():
     parser = argparse.ArgumentParser(description="OpenRouter TUI")
-    parser.add_argument("--history-file", default=None, help="Path to history file (default: ~/.openrouter_tui/history.json)")
+    parser.add_argument(
+        "--history-file",
+        default=None,
+        help="Path to history file (default: ~/.openrouter_tui/history.json)",
+    )
     args = parser.parse_args()
 
-    history_path = Path(args.history_file) if args.history_file else _default_history_path()
+    history_path = (
+        Path(args.history_file) if args.history_file else _default_history_path()
+    )
 
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
@@ -84,7 +118,9 @@ def main():
                 messages = last_messages
                 print("Loaded last conversation. Continuing where you left off.\n")
             else:
-                messages = [{"role": "system", "content": "You are a helpful assistant."}]
+                messages = [
+                    {"role": "system", "content": "You are a helpful assistant."}
+                ]
         except KeyboardInterrupt:
             print("\nTake care — goodbye!")
             return
@@ -94,7 +130,9 @@ def main():
     # Let the user pick a model at startup
     model = choose_model(session)
 
-    print("\nWelcome to OpenRouter TUI — type a message and press Enter.\nType '/model' at any time to change the model. Type '/save' to save the conversation. Ctrl-C to exit.\n")
+    print(
+        "\nWelcome to OpenRouter TUI — type a message and press Enter.\nType '/model' at any time to change the model. Type '/save' to save the conversation. Ctrl-C to exit.\n"
+    )
     try:
         while True:
             with patch_stdout():
@@ -118,20 +156,26 @@ def main():
 
             print("Assistant » ", end="", flush=True)
             buffer = []
-            # stream=True will yield chunks as they arrive
-            for chunk in create_chat(api_key, messages, model=model, stream=True):
-                print(chunk, end="", flush=True)
-                buffer.append(chunk)
-            final = "".join(buffer)
-            print("\n")
-            messages.append({"role": "assistant", "content": final})
+            try:
+                # stream=True will yield chunks as they arrive
+                for chunk in create_chat(api_key, messages, model=model, stream=True):
+                    print(chunk, end="", flush=True)
+                    buffer.append(chunk)
+                final = "".join(buffer)
+                print("\n")
+                messages.append({"role": "assistant", "content": final})
 
-            # Auto-save last conversation after assistant replies
-            save_conversation(history_path, messages)
+                # Auto-save last conversation after assistant replies
+                save_conversation(history_path, messages)
+            except Exception as e:
+                print(f"\nError: {e}\n")
+                # Remove the last user message if the assistant failed to reply,
+                # so the conversation state remains consistent.
+                messages.pop()
 
     except KeyboardInterrupt:
         print("\nTake care — goodbye!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
